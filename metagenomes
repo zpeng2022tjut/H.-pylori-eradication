@@ -1,1 +1,62 @@
-000
+
+#Filter contigs by size (1000 bp) for ORF prodiction (bbmap in metawrap env)
+reformat.sh in=/home/meta/data/meta/hp/assembly/ddk2.fq/metaspades/contigs.fasta out=/home/meta/data/meta/hp/assembly/filtered_contigs/ddk2_Filtered.fasta minlength=1000
+
+#prodigal注释
+prodigal \
+-a prodigal/R0001.faa \
+-d prodigal/R0001.fna \
+-f gff \
+-o prodigal/R0001.gff \
+-p meta \
+-s prodigal/R0001.stat \
+-i assembly/R0001/final_assembly.fasta &
+
+#构建blast参考数据库
+makeblastdb \
+ -dbtype nucl \
+ -in resfinder.fsa \
+ -input_type fasta \
+ -parse_seqids \
+ -out resfinder.blastdb
+ 
+#blast比对 (blastn:nucle to nucle; blastp: pept to pept; blastx:nucle to pept)
+ blastn -query prodigal/ddk1_Filtered.fasta.fna -out blastn/ddk1.txt -task blastn -db /home/meta/database/card/card.blastdb -num_threads 48 -evalue 1e-10 -outfmt 6 -perc_identity 80 -qcov_hsp_perc 70
+ 
+ #blastp没有-perc_identity筛选option, outmat 6结果中第三列pident (percentage of identical matches)即the percent identity，使用命令: awk '$3>=90' ddk1.txt > ddk1_filt.txt
+ blastp -query prodigal/ddk1_Filtered.fasta.faa -out blastp/ddk1.txt -task blastp -db /home/meta/database/sarg/sarg.blastdb -num_threads 36 -evalue 1e-10 -outfmt 6 -qcov_hsp_perc 70
+ awk '$3>=80' ddk1.txt > ddk1_filt.txt
+ 
+ #blastx没有-perc_identity筛选option, outmat 6结果中第三列pident (percentage of identical matches)即the percent identity，使用命令: awk '$3>=90' ddk1.txt > ddk1_filt.txt
+ blastx -query prodigal/ddk1_Filtered.fasta.fna -out blastx/ddk1.txt -task blastx -db /home/meta/database/sarg/sarg.blastdb -num_threads 36 -evalue 1e-10 -outfmt '6 qseqid sseqid pident nident qlen slen qstart qend evalue bitscore' -qcov_hsp_perc 70
+ 
+# 参数详解
+-task blastn : 任务执行模式，可选有'blastn' 'blastn-short' 'dc-megablast' 'megablast' 'rmblastn'
+-evalue 1e-10:  evalue值设置为1e-10
+-perc_identity 80 : 相似度大于80
+-qcov_hsp_perc 70 : 覆盖度大于70
+
+#通过awk 筛选匹配相似度大于80的contigs
+awk '{if ($3>=80) print}' ddk1.txt|less>ddk1_s1.txt   ###筛选ddk1.txt文件中第3列大于等于80的数据，并将符合的结果输入到ddk1_s1.txt文件中
+
+(需要分析contigs携带ARGs的profiles时，需要针对第一列重复注释的contigs进行去重处理，$: sort -k1,1 -u ddk1_s1.txt > ddk1_s2.txt)
+
+#提取txt文件中第一列数据
+awk '{print $1}' ddk1_s1.txt >ddk1_s2.txt
+#t删除txt文件中重复行（重复行只保留一行）的结果输出为txt文件
+sort ddk1_s2.txt | uniq > ddk1_s3.txt
+
+#删除最后_字符
+for line in $(cat ddk1_s3.txt); do  echo "File:${line%_*}"; done
+然后复制屏幕中输出的结果ddk1_s4.txt，
+
+#再利用$sed -r 's/.{5}//' ddk1_s4.txt > ddk1_s5.txt 命令去除前缀‘File:’并重新定向为新txt文件
+
+
+#筛选Filtering out by contig name (bbmap in args_oap env)
+filterbyname.sh in=/home/meta/data/meta/hp/assembly/filtered_contigs/ddk1_Filtered.fasta out=/home/meta/data/meta/hp/assembly/ARGs_hosts/ddk1_FA.fasta names=/home/meta/data/meta/hp/assembly/blastx/ddk1_s5.txt include=t
+
+#kraken2注释ACCs
+kraken2 -t 72 --db /home/meta/database/kraken2 --output filtered_ACCs --report filtered_ACCs/R0001.annotation.report filtered_ACCs/R0001_Filtered.fasta
+metawrap kraken2 -t 72 -o filtered_ACCs filtered_ACCs/R0003_Filtered.fasta
+
